@@ -14,6 +14,8 @@ set -euo pipefail
 NEMOCLAW_CMD=("$@")
 CHAT_UI_URL="${CHAT_UI_URL:-http://127.0.0.1:18789}"
 PUBLIC_PORT=18789
+LAKERA_GUARD_MODE="${LAKERA_GUARD_MODE:-disabled}"
+LAKERA_GUARD_PORT="${LAKERA_GUARD_PORT:-8932}"
 
 fix_openclaw_config() {
   python3 - <<'PYCFG'
@@ -166,12 +168,54 @@ PYAUTOPAIR
   echo "[gateway] auto-pair watcher launched (pid $!)"
 }
 
+setup_lakera_guard() {
+  if [ "$LAKERA_GUARD_MODE" = "disabled" ]; then
+    echo "[guard] Lakera Guard is disabled"
+    return
+  fi
+
+  if [ "$LAKERA_GUARD_MODE" = "sidecar" ]; then
+    echo "[guard] Starting Lakera Guard sidecar on port ${LAKERA_GUARD_PORT}..."
+    local guard_env=""
+    if [ -n "${LAKERA_GUARD_API_KEY:-}" ]; then
+      guard_env="-e LAKERA_GUARD_API_KEY=${LAKERA_GUARD_API_KEY}"
+    fi
+
+    docker rm -f lakera-guard 2>/dev/null || true
+    docker run -d --name lakera-guard --restart unless-stopped \
+      -p "${LAKERA_GUARD_PORT}:8000" \
+      ${guard_env} \
+      lakera/lakera-guard:latest
+
+    # Wait for sidecar health
+    local attempts=0
+    while [ $attempts -lt 15 ]; do
+      if curl -sf "http://127.0.0.1:${LAKERA_GUARD_PORT}/health" 2>/dev/null | grep -q "ok"; then
+        echo "[guard] Lakera Guard sidecar is healthy"
+        return
+      fi
+      attempts=$((attempts + 1))
+      sleep 2
+    done
+    echo "[guard] WARNING: Lakera Guard sidecar failed health check — continuing (fail-open)"
+  fi
+
+  if [ "$LAKERA_GUARD_MODE" = "saas" ]; then
+    if [ -z "${LAKERA_GUARD_API_KEY:-}" ]; then
+      echo "[guard] WARNING: LAKERA_GUARD_MODE=saas but LAKERA_GUARD_API_KEY is not set"
+    else
+      echo "[guard] Lakera Guard SaaS mode enabled (api.lakera.ai)"
+    fi
+  fi
+}
+
 echo 'Setting up NemoClaw...'
 openclaw doctor --fix > /dev/null 2>&1 || true
 openclaw models set nvidia/nemotron-3-super-120b-a12b > /dev/null 2>&1 || true
 write_auth_profile
-export CHAT_UI_URL PUBLIC_PORT
+export CHAT_UI_URL PUBLIC_PORT LAKERA_GUARD_MODE LAKERA_GUARD_PORT
 fix_openclaw_config
+setup_lakera_guard
 openclaw plugins install /opt/nemoclaw > /dev/null 2>&1 || true
 
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then

@@ -54,6 +54,20 @@ components:
         credential_env: "OPENAI_API_KEY"
         credential_default: "dummy"
 
+  # Lakera Guard — inference security screening layer.
+  # Detects prompt injection, jailbreaks, PII leakage, and content violations.
+  # Modes: "saas" (api.lakera.ai), "sidecar" (local container), "disabled".
+  guard:
+    mode: "saas"                     # override via LAKERA_GUARD_MODE env
+    endpoint: "https://api.lakera.ai"
+    credential_env: "LAKERA_GUARD_API_KEY"
+    fail_policy: "open"              # "open" = allow on guard failure, "closed" = block
+    screen_requests: true
+    screen_responses: true
+    sidecar:
+      image: "lakera/lakera-guard:latest"
+      port: 8932
+
   policy:
     base: "sandboxes/openclaw/policy.yaml"
     additions:

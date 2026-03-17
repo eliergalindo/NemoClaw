@@ -27,6 +27,8 @@ from typing import Any
 
 import yaml
 
+from . import lakera as lakera_guard
+
 
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -109,6 +111,8 @@ def action_plan(
     if endpoint_url:
         inference_cfg = {**inference_cfg, "endpoint": endpoint_url}
 
+    guard_plan = lakera_guard.guard_config_for_plan(blueprint)
+
     plan: dict[str, Any] = {
         "run_id": rid,
         "profile": profile,
@@ -124,6 +128,7 @@ def action_plan(
             "model": inference_cfg.get("model"),
             "credential_env": inference_cfg.get("credential_env"),
         },
+        "guard": guard_plan,
         "policy_additions": (
             blueprint.get("components", {}).get("policy", {}).get("additions", {})
         ),
@@ -217,14 +222,35 @@ def action_apply(
     run_cmd(provider_args, check=False, capture=True)
 
     # Step 3: Set inference route
-    progress(70, "Setting inference route")
+    progress(60, "Setting inference route")
     run_cmd(
         ["openshell", "inference", "set", "--provider", provider_name, "--model", model],
         check=False,
         capture=True,
     )
 
-    # Step 4: Save run state
+    # Step 4: Configure Lakera Guard (inference security)
+    progress(75, "Configuring Lakera Guard")
+    guard_cfg = lakera_guard.guard_config_for_plan(blueprint)
+    guard_mode = guard_cfg["mode"]
+
+    if guard_mode == "sidecar":
+        log("Starting Lakera Guard sidecar container...")
+        sidecar_result = lakera_guard.start_sidecar()
+        if sidecar_result["ok"]:
+            log(f"Lakera Guard sidecar running on port {sidecar_result['port']}")
+        else:
+            fail_policy = guard_cfg.get("fail_policy", "open")
+            if fail_policy == "closed":
+                log("ERROR: Lakera Guard sidecar failed to start (fail_policy=closed)")
+                sys.exit(1)
+            log("WARNING: Lakera Guard sidecar failed — continuing (fail_policy=open)")
+    elif guard_mode == "saas":
+        log("Lakera Guard SaaS mode enabled (api.lakera.ai)")
+    else:
+        log("Lakera Guard is disabled — no inference content screening")
+
+    # Step 5: Save run state
     progress(85, "Saving run state")
     state_dir = Path.home() / ".nemoclaw" / "state" / "runs" / rid
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -235,6 +261,7 @@ def action_apply(
                 "profile": profile,
                 "sandbox_name": sandbox_name,
                 "inference": inference_cfg,
+                "guard": guard_cfg,
                 "timestamp": datetime.now(UTC).isoformat(),
             },
             indent=2,

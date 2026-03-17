@@ -9,6 +9,7 @@ const { ROOT, SCRIPTS, run, runCapture } = require("./runner");
 const { prompt, ensureApiKey, getCredential } = require("./credentials");
 const registry = require("./registry");
 const nim = require("./nim");
+const lakera = require("./lakera");
 const policies = require("./policies");
 const { checkCgroupConfig } = require("./preflight");
 const HOST_GATEWAY_URL = "http://host.openshell.internal";
@@ -49,7 +50,7 @@ function installOpenshell() {
 // ── Step 1: Preflight ────────────────────────────────────────────
 
 async function preflight() {
-  step(1, 7, "Preflight checks");
+  step(1, 8, "Preflight checks");
 
   // Docker
   if (!isDockerRunning()) {
@@ -107,7 +108,7 @@ async function preflight() {
 // ── Step 2: Gateway ──────────────────────────────────────────────
 
 async function startGateway(gpu) {
-  step(2, 7, "Starting OpenShell gateway");
+  step(2, 8, "Starting OpenShell gateway");
 
   // Destroy old gateway
   run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
@@ -148,7 +149,7 @@ async function startGateway(gpu) {
 // ── Step 3: Sandbox ──────────────────────────────────────────────
 
 async function createSandbox(gpu) {
-  step(3, 7, "Creating sandbox");
+  step(3, 8, "Creating sandbox");
 
   const nameAnswer = await prompt("  Sandbox name [my-assistant]: ");
   const sandboxName = nameAnswer || "my-assistant";
@@ -213,7 +214,7 @@ async function createSandbox(gpu) {
 // ── Step 4: NIM ──────────────────────────────────────────────────
 
 async function setupNim(sandboxName, gpu) {
-  step(4, 7, "Configuring inference (NIM)");
+  step(4, 8, "Configuring inference (NIM)");
 
   let model = null;
   let provider = "nvidia-nim";
@@ -346,7 +347,7 @@ async function setupNim(sandboxName, gpu) {
 // ── Step 5: Inference provider ───────────────────────────────────
 
 async function setupInference(sandboxName, model, provider) {
-  step(5, 7, "Setting up inference provider");
+  step(5, 8, "Setting up inference provider");
 
   if (provider === "nvidia-nim") {
     // Create nvidia-nim provider
@@ -392,10 +393,79 @@ async function setupInference(sandboxName, model, provider) {
   console.log(`  ✓ Inference route set: ${provider} / ${model}`);
 }
 
-// ── Step 6: OpenClaw ─────────────────────────────────────────────
+// ── Step 6: Lakera Guard (inference security) ───────────────────
+
+async function setupGuard(sandboxName) {
+  step(6, 8, "Configuring inference security (Lakera Guard)");
+
+  const mode = lakera.resolveMode();
+
+  if (mode === "disabled") {
+    console.log("  ⓘ Lakera Guard is disabled (no LAKERA_GUARD_API_KEY set)");
+    console.log("    To enable, set LAKERA_GUARD_API_KEY and optionally LAKERA_GUARD_MODE");
+
+    const answer = await prompt("  Enable Lakera Guard now? [y/N]: ");
+    if (answer.toLowerCase() === "y") {
+      const key = await prompt("  Enter your Lakera Guard API key: ");
+      if (key) {
+        process.env.LAKERA_GUARD_API_KEY = key;
+
+        const modeAnswer = await prompt("  Guard mode — 1) SaaS (api.lakera.ai)  2) Sidecar (local container) [1]: ");
+        const selectedMode = modeAnswer === "2" ? "sidecar" : "saas";
+        process.env.LAKERA_GUARD_MODE = selectedMode;
+
+        if (selectedMode === "sidecar") {
+          console.log("  Starting Lakera Guard sidecar...");
+          const result = lakera.startSidecar();
+          if (result.ok) {
+            console.log(`  ✓ Lakera Guard sidecar running on port ${result.port}`);
+          } else {
+            console.log("  ⚠ Sidecar failed to start — falling back to SaaS mode");
+            process.env.LAKERA_GUARD_MODE = "saas";
+          }
+        } else {
+          console.log("  ✓ Lakera Guard SaaS mode enabled");
+        }
+
+        registry.updateSandbox(sandboxName, {
+          guard: { mode: process.env.LAKERA_GUARD_MODE, enabled: true },
+        });
+      } else {
+        console.log("  Skipping Lakera Guard setup.");
+      }
+    } else {
+      console.log("  Skipping Lakera Guard setup.");
+    }
+    return;
+  }
+
+  // Guard is already configured via env
+  if (mode === "sidecar") {
+    const status = lakera.sidecarStatus();
+    if (!status.running) {
+      console.log("  Starting Lakera Guard sidecar...");
+      const result = lakera.startSidecar();
+      if (result.ok) {
+        console.log(`  ✓ Lakera Guard sidecar running on port ${result.port}`);
+      } else {
+        console.log("  ⚠ Sidecar failed to start — guard will fail open");
+      }
+    } else {
+      console.log("  ✓ Lakera Guard sidecar already running");
+    }
+  } else {
+    console.log(`  ✓ Lakera Guard enabled in ${mode} mode`);
+  }
+
+  registry.updateSandbox(sandboxName, {
+    guard: { mode, enabled: true },
+  });
+}
+
+// ── Step 7: OpenClaw ─────────────────────────────────────────────
 
 async function setupOpenclaw(sandboxName) {
-  step(6, 7, "Setting up OpenClaw inside sandbox");
+  step(7, 8, "Setting up OpenClaw inside sandbox");
 
   // sandbox create with a command runs it inside the sandbox then exits.
   // Since the sandbox already exists, we create a throwaway connect + command
@@ -405,10 +475,10 @@ async function setupOpenclaw(sandboxName) {
   console.log("  ✓ OpenClaw gateway launched inside sandbox");
 }
 
-// ── Step 7: Policy presets ───────────────────────────────────────
+// ── Step 8: Policy presets ───────────────────────────────────────
 
 async function setupPolicies(sandboxName) {
-  step(7, 7, "Policy presets");
+  step(8, 8, "Policy presets");
 
   const suggestions = ["pypi", "npm"];
 
@@ -498,6 +568,7 @@ async function onboard() {
   const sandboxName = await createSandbox(gpu);
   const { model, provider } = await setupNim(sandboxName, gpu);
   await setupInference(sandboxName, model, provider);
+  await setupGuard(sandboxName);
   await setupOpenclaw(sandboxName);
   await setupPolicies(sandboxName);
   printDashboard(sandboxName, model, provider);

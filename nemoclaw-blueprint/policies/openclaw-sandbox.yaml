@@ -151,6 +151,32 @@ network_policies:
       - { path: /usr/local/bin/openclaw }
       - { path: /usr/local/bin/npm }
 
+  # ── Lakera Guard — inference security screening ─────────────────
+  # Allow the gateway/sandbox to reach the Lakera Guard API (SaaS mode)
+  # or the local sidecar container. Required when guard.mode != "disabled".
+  lakera_guard:
+    name: lakera_guard
+    endpoints:
+      - host: api.lakera.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        tls: terminate
+        rules:
+          - allow: { method: POST, path: "/v2/guard" }
+          - allow: { method: GET, path: "/health" }
+      # Sidecar mode — localhost on port 8932
+      - host: "127.0.0.1"
+        port: 8932
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v2/guard" }
+          - allow: { method: GET, path: "/health" }
+    binaries:
+      - { path: /usr/local/bin/openclaw }
+      - { path: /usr/bin/curl }
+
   # ── Messaging — pre-allowed for agent notifications ────────────
   # Telegram Bot API is open by default so the agent can send
   # notifications and respond to chats without triggering approval.
