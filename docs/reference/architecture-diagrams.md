@@ -187,6 +187,235 @@ flowchart LR
 
 _* Presets are optional and applied via `nemoclaw <name> policy-add`._
 
+## 3a. Inference Security with Lakera Guard
+
+The current inference pipeline has **no content-level security** — only network-level
+allow-listing. Lakera Guard can be inserted as a request/response screening layer
+between the OpenShell gateway and the inference provider to detect prompt injections,
+jailbreaks, data leakage, and content policy violations.
+
+### Current State vs. Proposed State
+
+```{mermaid}
+flowchart TB
+    subgraph CURRENT ["CURRENT: No Content Security"]
+        direction LR
+        C_AGENT["Agent"] -->|"prompt"| C_GW["OpenShell<br/>Gateway"]
+        C_GW -->|"network policy<br/>check only"| C_PROVIDER["Inference<br/>Provider"]
+        C_PROVIDER -->|"response<br/>(unscreened)"| C_GW
+        C_GW -->|"response"| C_AGENT
+    end
+
+    subgraph PROPOSED ["PROPOSED: With Lakera Guard"]
+        direction LR
+        P_AGENT["Agent"] -->|"prompt"| P_GW["OpenShell<br/>Gateway"]
+        P_GW -->|"1. screen<br/>request"| P_GUARD["Lakera Guard<br/>(sidecar or SaaS)"]
+        P_GUARD -->|"2. safe prompt<br/>forwarded"| P_PROVIDER["Inference<br/>Provider"]
+        P_PROVIDER -->|"3. LLM<br/>response"| P_GUARD2["Lakera Guard<br/>(response screen)"]
+        P_GUARD2 -->|"4. safe response<br/>returned"| P_AGENT
+    end
+
+    classDef nv fill:#76b900,stroke:#333,color:#fff
+    classDef guard fill:#ff6b35,stroke:#333,color:#fff
+    classDef provider fill:#e6f2cc,stroke:#76b900,color:#1a1a1a
+    classDef current fill:#999,stroke:#333,color:#fff
+
+    class C_AGENT,C_GW current
+    class C_PROVIDER current
+    class P_AGENT,P_GW nv
+    class P_GUARD,P_GUARD2 guard
+    class P_PROVIDER provider
+
+    style CURRENT fill:#fff5f5,stroke:#d94a4a,stroke-width:2px,color:#1a1a1a
+    style PROPOSED fill:#f5faed,stroke:#76b900,stroke-width:2px,color:#1a1a1a
+```
+
+### Detailed Lakera Guard Integration in Inference Pipeline
+
+```{mermaid}
+flowchart TD
+    AGENT["OpenClaw Agent<br/>(inside sandbox)"]
+
+    subgraph GW ["OpenShell Gateway (inference.local/v1)"]
+        direction TB
+        TLS["TLS termination +<br/>network policy check"]
+    end
+
+    subgraph LAKERA ["LAKERA GUARD LAYER"]
+        direction TB
+
+        subgraph PRE ["PRE-INFERENCE SCREENING"]
+            direction TB
+            PI["Prompt Injection<br/>Detection"]
+            JB["Jailbreak<br/>Detection"]
+            DL_IN["Data Leakage<br/>Scan (PII in prompt)"]
+            CV_IN["Content Violation<br/>Check"]
+        end
+
+        DECISION_IN{"Threat<br/>detected?"}
+    end
+
+    subgraph PROVIDER ["INFERENCE PROVIDER"]
+        direction TB
+        NV_CLOUD["NVIDIA Cloud"]
+        NIM_LOCAL["NIM Local"]
+        VLLM_LOCAL["vLLM Local"]
+        OLLAMA_LOCAL["Ollama Local"]
+    end
+
+    subgraph LAKERA_OUT ["LAKERA GUARD LAYER (Response)"]
+        direction TB
+
+        subgraph POST ["POST-INFERENCE SCREENING"]
+            direction TB
+            DL_OUT["Data Leakage<br/>Scan (PII in response)"]
+            CV_OUT["Content Violation<br/>Check"]
+            ML["Malicious Link<br/>Detection"]
+            HALLUC["Harmful Content<br/>Detection"]
+        end
+
+        DECISION_OUT{"Threat<br/>detected?"}
+    end
+
+    AGENT -->|"system prompt +<br/>user message"| TLS
+    TLS -->|"authorized request"| PRE
+    PI --> JB --> DL_IN --> CV_IN
+    CV_IN --> DECISION_IN
+    DECISION_IN -->|"SAFE"| PROVIDER
+    DECISION_IN -->|"BLOCKED"| ALERT_IN([Alert operator +<br/>log to audit trail])
+
+    PROVIDER -->|"LLM response"| POST
+    DL_OUT --> CV_OUT --> ML --> HALLUC
+    HALLUC --> DECISION_OUT
+    DECISION_OUT -->|"SAFE"| AGENT
+    DECISION_OUT -->|"BLOCKED"| ALERT_OUT([Sanitize or reject<br/>+ log to audit trail])
+
+    classDef nv fill:#76b900,stroke:#333,color:#fff
+    classDef guard fill:#ff6b35,stroke:#333,color:#fff
+    classDef provider fill:#e6f2cc,stroke:#76b900,color:#1a1a1a
+    classDef blocked fill:#d94a4a,stroke:#333,color:#fff
+    classDef decision fill:#ff6b35,stroke:#333,color:#fff
+
+    class AGENT nv
+    class TLS nv
+    class PI,JB,DL_IN,CV_IN,DL_OUT,CV_OUT,ML,HALLUC guard
+    class DECISION_IN,DECISION_OUT decision
+    class NV_CLOUD,NIM_LOCAL,VLLM_LOCAL,OLLAMA_LOCAL provider
+    class ALERT_IN,ALERT_OUT blocked
+
+    style GW fill:none,stroke:#76b900,stroke-width:2px,color:#1a1a1a
+    style LAKERA fill:none,stroke:#ff6b35,stroke-width:2px,color:#1a1a1a
+    style LAKERA_OUT fill:none,stroke:#ff6b35,stroke-width:2px,color:#1a1a1a
+    style PRE fill:none,stroke:#555,stroke-width:1px,stroke-dasharray:5 5,color:#1a1a1a
+    style POST fill:none,stroke:#555,stroke-width:1px,stroke-dasharray:5 5,color:#1a1a1a
+    style PROVIDER fill:none,stroke:#999,stroke-width:1px,color:#1a1a1a
+```
+
+### Integration Options
+
+```{mermaid}
+flowchart TB
+    subgraph OPT_A ["Option A: Gateway Sidecar (Recommended)"]
+        direction LR
+        A1["Start Lakera Guard<br/>container alongside<br/>OpenShell gateway"]
+        A2["Route inference.local<br/>through guard proxy<br/>(localhost:8932)"]
+        A3["Guard forwards safe<br/>requests to provider"]
+        A1 --> A2 --> A3
+    end
+
+    subgraph OPT_B ["Option B: SaaS API Middleware"]
+        direction LR
+        B1["Call Lakera Guard<br/>SaaS API before<br/>each inference call"]
+        B2["POST /v2/guard<br/>with full message<br/>context"]
+        B3["Proceed only if<br/>flagged_categories<br/>is empty"]
+        B1 --> B2 --> B3
+    end
+
+    subgraph OPT_C ["Option C: Blueprint Policy Extension"]
+        direction LR
+        C1["Extend<br/>openclaw-sandbox.yaml<br/>with guard middleware"]
+        C2["Policy engine calls<br/>Lakera Guard on<br/>inference endpoints"]
+        C3["Block/alert based<br/>on policy rules"]
+        C1 --> C2 --> C3
+    end
+
+    subgraph WHERE ["Where Each Option Hooks In"]
+        direction TB
+        W_A["Option A: nemoclaw-start.sh<br/>(start guard before gateway)"]
+        W_B["Option B: runner.py<br/>(add --middleware to<br/>openshell provider create)"]
+        W_C["Option C: openclaw-sandbox.yaml<br/>(add middleware: lakera-guard<br/>to inference endpoints)"]
+    end
+
+    classDef optA fill:#76b900,stroke:#333,color:#fff
+    classDef optB fill:#4a90d9,stroke:#333,color:#fff
+    classDef optC fill:#ff6b35,stroke:#333,color:#fff
+    classDef where fill:#333,stroke:#76b900,color:#fff
+
+    class A1,A2,A3 optA
+    class B1,B2,B3 optB
+    class C1,C2,C3 optC
+    class W_A,W_B,W_C where
+
+    style OPT_A fill:#f5faed,stroke:#76b900,stroke-width:2px,color:#1a1a1a
+    style OPT_B fill:#eef4fc,stroke:#4a90d9,stroke-width:2px,color:#1a1a1a
+    style OPT_C fill:#fff5ef,stroke:#ff6b35,stroke-width:2px,color:#1a1a1a
+    style WHERE fill:none,stroke:#555,stroke-width:1px,stroke-dasharray:5 5,color:#1a1a1a
+```
+
+### Security Coverage Matrix
+
+```{mermaid}
+flowchart LR
+    subgraph EXISTING ["Existing Security (NemoClaw)"]
+        direction TB
+        E1["Network allow-list<br/>(deny-by-default)"]
+        E2["Filesystem isolation<br/>(RW: /sandbox, /tmp)"]
+        E3["Process isolation<br/>(unprivileged user)"]
+        E4["TLS termination<br/>(gateway level)"]
+        E5["Blueprint digest<br/>verification"]
+        E6["Credential encryption<br/>(mode 600)"]
+    end
+
+    subgraph GAP ["Security Gap (No Coverage)"]
+        direction TB
+        G1["Prompt injection"]
+        G2["Jailbreak attempts"]
+        G3["PII / data leakage"]
+        G4["Harmful content<br/>generation"]
+        G5["Malicious URLs<br/>in LLM output"]
+        G6["Indirect injection<br/>via tool/retrieval"]
+    end
+
+    subgraph LAKERA_FIX ["Lakera Guard Fills The Gap"]
+        direction TB
+        L1["Prompt attack<br/>detection"]
+        L2["Jailbreak<br/>detection"]
+        L3["PII scanner<br/>(request + response)"]
+        L4["Content violation<br/>detection"]
+        L5["Malicious link<br/>detection"]
+        L6["Agentic / MCP<br/>security screening"]
+    end
+
+    G1 -.->|"solved by"| L1
+    G2 -.->|"solved by"| L2
+    G3 -.->|"solved by"| L3
+    G4 -.->|"solved by"| L4
+    G5 -.->|"solved by"| L5
+    G6 -.->|"solved by"| L6
+
+    classDef existing fill:#76b900,stroke:#333,color:#fff
+    classDef gap fill:#d94a4a,stroke:#333,color:#fff
+    classDef fix fill:#ff6b35,stroke:#333,color:#fff
+
+    class E1,E2,E3,E4,E5,E6 existing
+    class G1,G2,G3,G4,G5,G6 gap
+    class L1,L2,L3,L4,L5,L6 fix
+
+    style EXISTING fill:#f5faed,stroke:#76b900,stroke-width:2px,color:#1a1a1a
+    style GAP fill:#fff5f5,stroke:#d94a4a,stroke-width:2px,color:#1a1a1a
+    style LAKERA_FIX fill:#fff5ef,stroke:#ff6b35,stroke-width:2px,color:#1a1a1a
+```
+
 ## 4. Blueprint Lifecycle
 
 ```{mermaid}
