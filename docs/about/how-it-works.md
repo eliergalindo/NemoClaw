@@ -115,6 +115,23 @@ Inference requests from the agent never leave the sandbox directly.
 OpenShell intercepts every inference call and routes it to the configured provider.
 NemoClaw routes inference to NVIDIA cloud, specifically Nemotron 3 Super 120B through [build.nvidia.com](https://build.nvidia.com). You can switch models at runtime without restarting the sandbox.
 
+## Inference Security
+
+NemoClaw can optionally screen inference traffic through [Lakera Guard](https://www.lakera.ai/lakera-guard)
+to detect prompt injection, jailbreaks, PII leakage, and content violations.
+When enabled, every request and response in the inference pipeline passes through
+the Lakera Guard API before reaching the provider or the agent.
+
+Lakera Guard runs in one of two modes:
+
+- **SaaS** — Calls the Lakera Guard cloud API. Set `LAKERA_GUARD_API_KEY` to enable.
+- **Sidecar** — Runs a local Lakera Guard container alongside the OpenShell gateway. Set `LAKERA_GUARD_MODE=sidecar` for air-gapped deployments.
+
+A configurable `fail_policy` controls behavior when the guard is unreachable:
+`open` allows requests through (default), `closed` blocks them.
+
+See [Secure Inference with Lakera Guard](../inference/lakera-guard.md) for setup instructions.
+
 ## Network and Filesystem Policy
 
 The sandbox starts with a strict baseline policy defined in `openclaw-sandbox.yaml`.

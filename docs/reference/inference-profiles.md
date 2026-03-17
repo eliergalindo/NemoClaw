@@ -71,3 +71,27 @@ $ openshell inference set --provider nvidia-nim --model <model-name>
 
 The change takes effect immediately.
 No sandbox restart is needed.
+
+## Inference Security with Lakera Guard
+
+NemoClaw can screen inference requests and responses through Lakera Guard
+to detect prompt injection, jailbreaks, PII leakage, and content violations.
+
+Lakera Guard is configured in the `components.guard` section of `blueprint.yaml`
+and supports two deployment modes:
+
+| Mode | Endpoint | Use Case |
+|---|---|---|
+| `saas` | `api.lakera.ai` | Cloud screening. Requires `LAKERA_GUARD_API_KEY`. |
+| `sidecar` | `localhost:8932` | Local container. For air-gapped environments. |
+| `disabled` | — | No content screening (default when no API key is set). |
+
+The guard is invoked at two points in the inference pipeline:
+
+1. **Pre-inference** — Screens the full message context before it reaches the provider.
+2. **Post-inference** — Screens the LLM response before it reaches the agent.
+
+A `fail_policy` setting controls behavior when the guard is unreachable:
+`open` (default) allows requests through; `closed` blocks them.
+
+See [Secure Inference with Lakera Guard](../inference/lakera-guard.md) for setup instructions and configuration reference.

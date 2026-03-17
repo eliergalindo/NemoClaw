@@ -164,6 +164,16 @@ Egress control, operator approval flow, and policy configuration.
 {bdg-secondary}`Reference`
 :::
 
+:::{grid-item-card} Inference Security
+:link: inference/lakera-guard
+:link-type: doc
+
+Screen inference for prompt injection, jailbreaks, and PII leakage with Lakera Guard.
+
++++
+{bdg-secondary}`How-To`
+:::
+
 :::{grid-item-card} How-To Guides
 :link: inference/switch-inference-providers
 :link-type: doc
@@ -203,6 +213,7 @@ Quickstart <get-started/quickstart>
 :hidden:
 
 Switch Inference Providers <inference/switch-inference-providers>
+Secure Inference with Lakera Guard <inference/lakera-guard>
 ```
 
 ```{toctree}
