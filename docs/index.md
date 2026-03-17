@@ -247,6 +247,7 @@ Architecture <reference/architecture>
 Commands <reference/commands>
 Inference Profiles <reference/inference-profiles>
 Network Policies <reference/network-policies>
+Security Enhancement Summary <reference/security-enhancement-summary>
 ```
 
 ```{toctree}
