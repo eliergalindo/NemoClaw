@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Interactive onboarding wizard — 7 steps from zero to running sandbox.
+// Interactive onboarding wizard — 8 steps from zero to running sandbox.
 
 const fs = require("fs");
 const path = require("path");
@@ -545,9 +545,15 @@ function printDashboard(sandboxName, model, provider) {
   console.log("");
   console.log(`  ${"─".repeat(50)}`);
   // console.log(`  Dashboard    http://localhost:18789/`);
+  const guardMode = lakera.resolveMode();
+  const guardLabel = guardMode === "disabled" ? "disabled"
+    : guardMode === "sidecar" ? `sidecar (port ${lakera.LAKERA_SIDECAR_PORT})`
+    : `${guardMode} (api.lakera.ai)`;
+
   console.log(`  Sandbox      ${sandboxName} (Landlock + seccomp + netns)`);
   console.log(`  Model        ${model} (${providerLabel})`);
   console.log(`  NIM          ${nimLabel}`);
+  console.log(`  Guard        ${guardLabel}`);
   console.log(`  ${"─".repeat(50)}`);
   console.log(`  Run:         nemoclaw ${sandboxName} connect`);
   console.log(`  Status:      nemoclaw ${sandboxName} status`);

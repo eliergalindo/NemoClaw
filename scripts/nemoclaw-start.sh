@@ -176,16 +176,17 @@ setup_lakera_guard() {
 
   if [ "$LAKERA_GUARD_MODE" = "sidecar" ]; then
     echo "[guard] Starting Lakera Guard sidecar on port ${LAKERA_GUARD_PORT}..."
-    local guard_env=""
+    local -a guard_docker_args=(
+      docker run -d --name lakera-guard --restart unless-stopped
+      -p "${LAKERA_GUARD_PORT}:8000"
+    )
     if [ -n "${LAKERA_GUARD_API_KEY:-}" ]; then
-      guard_env="-e LAKERA_GUARD_API_KEY=${LAKERA_GUARD_API_KEY}"
+      guard_docker_args+=(-e "LAKERA_GUARD_API_KEY=${LAKERA_GUARD_API_KEY}")
     fi
+    guard_docker_args+=(lakera/lakera-guard:latest)
 
     docker rm -f lakera-guard 2>/dev/null || true
-    docker run -d --name lakera-guard --restart unless-stopped \
-      -p "${LAKERA_GUARD_PORT}:8000" \
-      ${guard_env} \
-      lakera/lakera-guard:latest
+    "${guard_docker_args[@]}"
 
     # Wait for sidecar health
     local attempts=0

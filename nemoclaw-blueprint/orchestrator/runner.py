@@ -325,6 +325,12 @@ def action_rollback(rid: str) -> None:
             capture=True,
         )
 
+        # Stop Lakera Guard sidecar if it was running
+        guard_mode = plan.get("guard", {}).get("mode")
+        if guard_mode == "sidecar":
+            progress(75, "Stopping Lakera Guard sidecar")
+            lakera_guard.stop_sidecar()
+
     progress(90, "Cleaning up run state")
     (state_dir / "rolled_back").write_text(datetime.now(UTC).isoformat())
 

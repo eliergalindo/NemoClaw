@@ -51,13 +51,16 @@ function startSidecar() {
   run(`docker rm -f ${name} 2>/dev/null || true`, { ignoreError: true });
 
   const apiKey = process.env.LAKERA_GUARD_API_KEY || "";
-  const envFlag = apiKey ? `-e LAKERA_GUARD_API_KEY=${apiKey}` : "";
-
-  run(
-    `docker run -d --name ${name} --restart unless-stopped ` +
-    `-p ${LAKERA_SIDECAR_PORT}:8000 ${envFlag} ${LAKERA_SIDECAR_IMAGE}`,
-    { ignoreError: false }
-  );
+  const { execFileSync } = require("child_process");
+  const dockerArgs = [
+    "run", "-d", "--name", name, "--restart", "unless-stopped",
+    "-p", `${LAKERA_SIDECAR_PORT}:8000`,
+  ];
+  if (apiKey) {
+    dockerArgs.push("-e", `LAKERA_GUARD_API_KEY=${apiKey}`);
+  }
+  dockerArgs.push(LAKERA_SIDECAR_IMAGE);
+  execFileSync("docker", dockerArgs, { stdio: "pipe" });
 
   // Wait for health
   for (let i = 0; i < 15; i++) {

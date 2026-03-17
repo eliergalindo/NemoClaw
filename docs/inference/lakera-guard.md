@@ -63,10 +63,14 @@ $ nemoclaw onboard
 
 Step 6 of the onboarding wizard detects the key and enables SaaS mode automatically.
 
-### Sidecar Mode (Air-Gapped)
+### Sidecar Mode (Self-Hosted)
 
 A local Lakera Guard container runs alongside the OpenShell gateway.
-Use this mode when the sandbox must not reach external APIs.
+Use this mode to keep inference screening on-premises without routing
+traffic through the Lakera cloud API. The sidecar container may still
+require an API key for license validation and threat intelligence updates
+depending on your Lakera subscription. Contact Lakera for fully offline
+deployment options.
 
 ```console
 $ export LAKERA_GUARD_API_KEY="your-key-here"
